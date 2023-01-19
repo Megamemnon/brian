@@ -9,6 +9,7 @@
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/brian.py",
+      "args": ["rules.brul","program.bprg"],
       "console": "integratedTerminal",
       "justMyCode": true
     }

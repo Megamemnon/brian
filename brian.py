@@ -1,5 +1,5 @@
 
-import enum
+import enum, sys 
 
 ANSIESC='\033'
 RESET=ANSIESC+'[0m'
@@ -50,9 +50,12 @@ class ASTNode():
       case TokenType.operator:
         if paren and self.symbol!=',':
           f+='('
-        f+=self.left .getFormula()
-        f+=self.symbol
-        f+=self.right .getFormula()
+        f+=self.left.getFormula()
+        if self.symbol=='$':
+          f+=self.right.getFormula(True)
+        else:
+          f+=self.symbol
+          f+=self.right.getFormula()
         if paren and self.symbol!=',':
           f+=')'
       case TokenType.identifier:
@@ -70,7 +73,7 @@ class ASTNode():
   def equivalent(self, astnode):
     l=True
     r=True
-    if self.nodetype==TokenType.identifier and self.symbol[0].isupper():
+    if astnode.nodetype==TokenType.identifier and astnode.symbol[0].isupper():
       return True
     if astnode.nodetype!=self.nodetype:
       return False
@@ -126,9 +129,10 @@ class ASTNode():
 
   def resolve(self, astnode):
     resolution=[]
-    x=self.unify(astnode)
-    if x is not None:
-      resolution.append([self, x])
+    if self.equivalent(astnode):
+      x=self.unify(astnode)
+      if x is not None:
+        resolution.append([self, x])
     if self.left is not None:
       x=self.left.resolve(astnode)
       if x is not None:
@@ -213,12 +217,14 @@ def formulaToAST(formula):
       return TokenType.operator
 
   def getnextword(i):
-    if i==len(formula):
+    if i>=len(formula):
       return None
     w=''  # word
     c=formula[i]
     while c in SEPARATORS:
       i+=1
+      if i>=len(formula):
+        return None
       c=formula[i]
     if c in PARENS or c in LISTENS or c in CURLYENS:
       return (c,i+1)
@@ -464,37 +470,56 @@ def applyRules():
   for i in range(len(Program)):
     stmnt=Program[i]
     formula_ast=formulaToAST(stmnt)
-    for rule in Rules:
-      rule_ast = formulaToAST(rule)
-      rterm=rule_ast.left
-      resolutions=formula_ast.resolve(rterm)
-      if resolutions is not None:
-        for fnu in resolutions:
-          matchedNode=fnu[0]
-          for nu in fnu[1]:
+    changed=True
+    while changed:
+      changed=False
+      for rule in Rules:
+        rule_ast = formulaToAST(rule)
+        rterm=rule_ast.left
+        resolutions=formula_ast.resolve(rterm)
+        if resolutions is not None:
+          for fnu in resolutions:
+            matchedNode=fnu[0]
             rplc=rule_ast.right.copy()
-            rplc=applyUnifier(rplc, nu)
-            if matchedNode.id==formula_ast.id:
-              formula_ast=rplc
-              break
-            else:
-              formula_ast.replaceNode(matchedNode,rplc)
+            rulerhs=rplc.getFormula(False)
+            for nu in fnu[1]:
+              rplc=applyUnifier(rplc, nu)
+            modrhs=rplc.getFormula(False)
+            if rulerhs!=modrhs:
+              if matchedNode.id==formula_ast.id:
+                formula_ast=rplc
+                changed=True
+              else:
+                formula_ast.replaceNode(matchedNode,rplc)
+                changed=True
     Program[i]=formula_ast.getFormula(False)
 
-def printProgram():
-  for s in Program:
-    print(s)
+def loadFile(filepath, listVar):
+  with open(filepath, "r") as f:
+    buffer=f.readlines()
+  for line in buffer:
+    if line[-1]=='\n':
+      listVar.append(line[:-1])
+    else:
+      listVar.append(line)
+
+def printList(l):
+  for c,entry in enumerate(l):
+    print(f'  {c+1}  {entry}')
 
 def main():
   print(f'Brian v0.1 Copyright (c) 2022 Brian O\'Dell')
-  Rules.append('(head[A,B])->A')
-  Program.append('head[c,d,e,f]')
-  printProgram()
+  if len(sys.argv)<3:
+    print(f'usage: {sys.argv[0]} rules program')
+  loadFile(sys.argv[1], Rules)
+  loadFile(sys.argv[2], Program)
+  print('Rules')
+  printList(Rules)
+  print('Program')
+  printList(Program)
   applyRules()
-  printProgram()
-
-
-
+  print('Transformed Program')
+  printList(Program)
 
 if __name__=='__main__':
   main()

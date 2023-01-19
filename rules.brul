@@ -1,0 +1,4 @@
+cons(A,[B])->[A,B]
+cons(A,B)->[A,B]
+car([A,B])->A
+cdr([A,B])->[B]
