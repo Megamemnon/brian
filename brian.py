@@ -52,7 +52,9 @@ class ASTNode():
           f+='('
         f+=self.left.getFormula()
         if self.symbol=='$':
-          f+=self.right.getFormula(True)
+          f+='('
+          f+=self.right.getFormula(False)
+          f+=')'
         else:
           f+=self.symbol
           f+=self.right.getFormula()
@@ -494,14 +496,26 @@ def applyRules():
                 changed=True
     Program[i]=formula_ast.getFormula(False)
 
-def loadFile(filepath, listVar):
+def loadFile(filepath):
   with open(filepath, "r") as f:
     buffer=f.readlines()
-  for line in buffer:
-    if line[-1]=='\n':
-      listVar.append(line[:-1])
-    else:
-      listVar.append(line)
+  for i,b in enumerate(buffer):
+    line=b
+    if b[-1]=='\n':
+      line=b[:-1]
+    l=line.split()
+    if len(l)>0:
+      if l[0][0]!='#':
+        try:
+          ast=formulaToAST(line)
+          line=ast.getFormula(False)
+        except:
+          print(f'Unable to parse line {i}: {line}')
+          sys.exit(0)
+        if ast.symbol=='->':
+          Rules.append(line)
+        else:
+          Program.append(line)
 
 def printList(l):
   for c,entry in enumerate(l):
@@ -509,10 +523,9 @@ def printList(l):
 
 def main():
   print(f'Brian v0.1 Copyright (c) 2022 Brian O\'Dell')
-  if len(sys.argv)<3:
-    print(f'usage: {sys.argv[0]} rules program')
-  loadFile(sys.argv[1], Rules)
-  loadFile(sys.argv[2], Program)
+  if len(sys.argv)<2:
+    print(f'usage: {sys.argv[0]} program')
+  loadFile(sys.argv[1])
   print('Rules')
   printList(Rules)
   print('Program')
