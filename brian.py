@@ -30,6 +30,7 @@ class TokenType(enum.Enum):
   curlyclose=6
   identifier=7
   operator=8
+  text=9
 
 def ispunctuation(char):
   if char.isprintable() and not char.isalnum():
@@ -60,7 +61,7 @@ class ASTNode():
           f+=self.right.getFormula()
         if paren and self.symbol!=',':
           f+=')'
-      case TokenType.identifier:
+      case TokenType.identifier|TokenType.text:
         f+=self.symbol
       case TokenType.listopen:
         f+='['
@@ -213,6 +214,10 @@ def formulaToAST(formula):
       return TokenType.curlyopen
     if w[0]==CURLYENS[1]:
       return TokenType.curlyclose
+    if w[0]=='"':
+      return TokenType.text
+    if w[0]==' ':
+      return TokenType.identifier
     if w[0].isalnum():
       return TokenType.identifier
     else:
@@ -228,15 +233,27 @@ def formulaToAST(formula):
       if i>=len(formula):
         return None
       c=formula[i]
-    if c in PARENS or c in LISTENS or c in CURLYENS:
+    if c in PARENS or c in LISTENS or c in CURLYENS or c==' ':
       return (c,i+1)
-    if ispunctuation(c):
+    if c=='"':
+      textend=0
+      while textend<2:
+        w+=c
+        i+=1
+        if c=='"':
+          textend+=1
+        if i>=len(formula):
+          w+='"'
+          return (w,i)
+        c=formula[i]
+      return (w,i)
+    if ispunctuation(c):      
       while ispunctuation(c):
         if c in BREAKING:
           return (w,i)
         w+=c
         i+=1
-        if i==len(formula):
+        if i>=len(formula):
           return (w,i)
         c=formula[i]
         if c in SEPARATORS:
@@ -289,7 +306,7 @@ def formulaToAST(formula):
           postfix.append(op)
           op=opstack.pop()
         postfix.append((word,wtype))
-      case TokenType.identifier:
+      case TokenType.identifier|TokenType.text:
         postfix.append((word,wtype))
       case TokenType.operator:
         if len(opstack)>0:
@@ -334,6 +351,23 @@ def formulaToAST(formula):
   while len(opstack)>0:
     postfix.append(opstack.pop())
   
+  postfix2=[]
+  for term in postfix:
+    if term[1]==TokenType.text:
+      postfix2.append(('[',TokenType.listopen))
+      terma=term[0][1:-1]
+      for txt in terma:
+        if txt==' ':
+          postfix2.append((' ', TokenType.identifier))
+        else:
+          postfix2.append((txt, TokenType.identifier))
+      for count in range(len(terma)-1):
+        postfix2.append((',',TokenType.operator))
+      postfix2.append((']',TokenType.listclose))
+    else:
+      postfix2.append(term)
+  postfix=postfix2
+
   # convert postfix to AST
   id=1      # node id counter
   index=0   # postfix list index
@@ -341,6 +375,10 @@ def formulaToAST(formula):
     wordtuple=postfix[index]
     match wordtuple[1]:
       case TokenType.identifier:
+        node=ASTNode(wordtuple[1],wordtuple[0],None, None, id)
+        id+=1
+        output.append(node)
+      case TokenType.text:
         node=ASTNode(wordtuple[1],wordtuple[0],None, None, id)
         id+=1
         output.append(node)
@@ -468,10 +506,12 @@ def getUnifierErrors(unifier):
   return uclean
 
 def applyRules():
+  debug=False
   i=0
   for i in range(len(Program)):
     stmnt=Program[i]
     formula_ast=formulaToAST(stmnt)
+    # apply user-provided transformation rules
     changed=True
     while changed:
       changed=False
@@ -488,6 +528,11 @@ def applyRules():
               rplc=applyUnifier(rplc, nu)
             modrhs=rplc.getFormula(False)
             if rulerhs!=modrhs:
+              if debug:
+                print(f'DEBUG: Statement - {colorizeFormula(formula_ast.getFormula(False))}')
+                print(f'DEBUG:   Rule - {colorizeFormula(rule)}')
+                print(f'DEBUG:     Matched Node - {colorizeFormula(matchedNode.getFormula(False))}')
+                print(f'DEBUG:       Transformed Node - {colorizeFormula(modrhs)}')
               if matchedNode.id==formula_ast.id:
                 formula_ast=rplc
                 changed=True
@@ -495,6 +540,35 @@ def applyRules():
                 formula_ast.replaceNode(matchedNode,rplc)
                 changed=True
     Program[i]=formula_ast.getFormula(False)
+
+    # run builtins
+    builtin='print(X)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      for fnu in resolutions:
+        for nu in fnu[1]:
+          term=nu[1].getFormula(False)
+          if term[0]=='[' and term[-1]==']':
+            term=term[1:-1]
+            termlist=term.split(',')
+            term=''
+            for termx in termlist:
+              term+=termx
+          print(f'output: {colorizeFormula(term)}')
+    builtin='debug(t)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      debug=True
+    builtin='debug(f)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      for fnu in resolutions:
+        for nu in fnu[1]:
+          debug=False
+
 
 def loadFile(filepath):
   with open(filepath, "r") as f:

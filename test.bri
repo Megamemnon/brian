@@ -5,5 +5,7 @@ car([A,B])->A
 cdr([A,B])->[B]
 
 #Program
-car(cdr(cdr(cdr(cons(x,[a,b,c,d])))))
+debug(t)
+print(car(cdr(cdr(cdr(cons(x,[a,b,c,d]))))))
 cdr([a,b,c,d])
+print("This program is done")
