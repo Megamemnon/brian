@@ -20,6 +20,7 @@ BREAKING='()[]{}'
 
 Rules = []
 Program = []
+Environment=[]
 
 class TokenType(enum.Enum):
   parenopen=1
@@ -36,6 +37,16 @@ def ispunctuation(char):
   if char.isprintable() and not char.isalnum():
     return True
   return False
+
+class EnvironmentNode():
+  def __init__(self):
+    self.vars=None
+
+class VariableNode():
+  def __init__(self, variable, value):
+    self.variable=variable
+    self.value=value
+    self.next=None 
 
 class ASTNode():
   def __init__(self, nodetype, symbol, left, right, id):
@@ -472,45 +483,59 @@ def applyUnifier(node, unifier):
       node.replaceVariable(unifier[0].symbol,unifier[1])
   return node
 
-def getUnifierErrors(unifier):
-  uerrors=[]
-  uclean=[]
-  for u in unifier:
-    if len(uclean)==0:
-      uclean.append(u)
-    else:
-      found=False
-      u1=u[1].getFormula(False)
-      u0=u[0].getFormula(False)
-      for uc in uclean:
-        uc1=uc[1].getFormula(False)
-        uc0=uc[0].getFormula(False)
-        if u1==uc1 and u0!=uc0:
-          uerrors.append(u)
-          uerrors.append(uc)
-          found=True
-      if not found:
-        uclean.append(u)
-  uclean=[]
-  for ue in uerrors:
-    if len(uclean)==0:
-      uclean.append(ue)
-    else:
-      ue1=ue[1].getFormula(False)
-      ue0=ue[0].getFormula(False)
-      for uc in uclean:
-        uc1=uc[1].getFormula(False)
-        uc0=uc[0].getFormula(False)
-        if ue1==uc1 and ue0!=uc0:
-          uclean.append(ue)
-  return uclean
+def loadFile(filepath):
+  with open(filepath, "r") as f:
+    buffer=f.readlines()
+  for b in buffer:
+    line=b
+    if b[-1]=='\n':
+      line=b[:-1]
+    l=line.split()
+    if len(l)>0:
+      if l[0][0]!='#':
+        Program.append(line)
 
-def applyRules():
+def printList(l):
+  for c,entry in enumerate(l):
+    print(f'  {c+1}  {entry}')
+
+def getEnvironmentVariable(var):
+  varnode=Environment[-1].vars
+  priorvarnode=None
+  while varnode is not None:
+    priorvarnode=varnode
+    if varnode.variable==var:
+      return varnode
+    varnode=varnode.next
+  if priorvarnode is None:
+    Environment[-1].vars=VariableNode(var, None)
+    return Environment[-1].vars
+  else:
+    priorvarnode.next=VariableNode(var, None)
+    return priorvarnode.next
+
+def updateEnvironmentVariable(binding):
+  var=binding.variable
+  varnode=getEnvironmentVariable(var)
+  varnode.value=binding.value
+
+
+
+def run():
   debug=False
   i=0
   for i in range(len(Program)):
     stmnt=Program[i]
-    formula_ast=formulaToAST(stmnt)
+    try:
+      formula_ast=formulaToAST(stmnt)
+      stmnt=formula_ast.getFormula(False)    
+    except:
+      print(f'Unable to parse line {stmnt}')
+      sys.exit(0)
+    # put Rules in Rules list
+    if formula_ast.symbol=='->':
+      Rules.append(stmnt)
+      continue
     # apply user-provided transformation rules
     changed=True
     while changed:
@@ -539,27 +564,14 @@ def applyRules():
               else:
                 formula_ast.replaceNode(matchedNode,rplc)
                 changed=True
-    Program[i]=formula_ast.getFormula(False)
 
     # run builtins
-    builtin='print(X)'
-    b_ast=formulaToAST(builtin)
-    resolutions=formula_ast.resolve(b_ast)
-    if resolutions is not None:
-      for fnu in resolutions:
-        for nu in fnu[1]:
-          term=nu[1].getFormula(False)
-          if term[0]=='[' and term[-1]==']':
-            term=term[1:-1]
-            termlist=term.split(',')
-            term=''
-            for termx in termlist:
-              term+=termx
-          print(f'output: {colorizeFormula(term)}')
     builtin='debug(t)'
     b_ast=formulaToAST(builtin)
     resolutions=formula_ast.resolve(b_ast)
     if resolutions is not None:
+      # TODO remove matched node from formula_ast
+      changed=True
       debug=True
     builtin='debug(f)'
     b_ast=formulaToAST(builtin)
@@ -567,46 +579,121 @@ def applyRules():
     if resolutions is not None:
       for fnu in resolutions:
         for nu in fnu[1]:
+          # TODO remove matched node from formula_ast
+          changed=True
           debug=False
+    builtin='print(X)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      for fnu in resolutions:
+        for nu in fnu[1]:
+          # TODO remove matched node from formula_ast
+          changed=True
+          term=nu[1].getFormula(False)
+          if term[0]=='[' and term[-1]==']':
+            term=term[1:-1]
+            termlist=term.split(',')
+            term=''
+            for termx in termlist:
+              term+=termx
+          print(f'{colorizeFormula(term)}')
+    builtin='setvar(X,Y)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      try:
+        x=resolutions[0][1][0][1].getFormula(False)
+        y=resolutions[0][1][1][1].getFormula(False)
+        binding=VariableNode(x, y)
+        updateEnvironmentVariable(binding)
+        # TODO remove matched node from formula_ast
+        changed=True
+      except:
+        print(f'ERROR: setvar failed in statement - {stmnt}')
+        sys.exit(0)          
+    builtin='getvar(X)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      try:
+        x=resolutions[0][1][0][1].getFormula(False)
+        binding=getEnvironmentVariable(x)
+        # TODO replace matched node with binding.value
+        changed=True
+      except:
+        print(f'ERROR: getvar failed in statement - {stmnt}')
+        sys.exit(0)          
+    builtin='env(new)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      Environment.append(EnvironmentNode())
+      # TODO remove matched node
+      changed=True
+    builtin='env(drop)'
+    b_ast=formulaToAST(builtin)
+    resolutions=formula_ast.resolve(b_ast)
+    if resolutions is not None:
+      try:
+        Environment.pop()
+        # TODO remove matched node
+        changed=True
+      except:
+        print(f'ERROR: no current environment to drop in statement - {stmnt}')
+        sys.exit(0)          
 
 
-def loadFile(filepath):
-  with open(filepath, "r") as f:
-    buffer=f.readlines()
-  for i,b in enumerate(buffer):
-    line=b
-    if b[-1]=='\n':
-      line=b[:-1]
-    l=line.split()
-    if len(l)>0:
-      if l[0][0]!='#':
-        try:
-          ast=formulaToAST(line)
-          line=ast.getFormula(False)
-        except:
-          print(f'Unable to parse line {i}: {line}')
-          sys.exit(0)
-        if ast.symbol=='->':
-          Rules.append(line)
-        else:
-          Program.append(line)
+    Program[i]=formula_ast.getFormula(False)
 
-def printList(l):
-  for c,entry in enumerate(l):
-    print(f'  {c+1}  {entry}')
 
 def main():
   print(f'Brian v0.1 Copyright (c) 2022 Brian O\'Dell')
   if len(sys.argv)<2:
     print(f'usage: {sys.argv[0]} program')
   loadFile(sys.argv[1])
-  print('Rules')
-  printList(Rules)
-  print('Program')
-  printList(Program)
-  applyRules()
-  print('Transformed Program')
-  printList(Program)
+  # print('Rules')
+  # printList(Rules)
+  # print('Program')
+  # printList(Program)
+  Environment.append(EnvironmentNode())
+  run()
+  # print('Transformed Program')
+  # printList(Program)
 
 if __name__=='__main__':
   main()
+
+
+# def getUnifierErrors(unifier):
+#   uerrors=[]
+#   uclean=[]
+#   for u in unifier:
+#     if len(uclean)==0:
+#       uclean.append(u)
+#     else:
+#       found=False
+#       u1=u[1].getFormula(False)
+#       u0=u[0].getFormula(False)
+#       for uc in uclean:
+#         uc1=uc[1].getFormula(False)
+#         uc0=uc[0].getFormula(False)
+#         if u1==uc1 and u0!=uc0:
+#           uerrors.append(u)
+#           uerrors.append(uc)
+#           found=True
+#       if not found:
+#         uclean.append(u)
+#   uclean=[]
+#   for ue in uerrors:
+#     if len(uclean)==0:
+#       uclean.append(ue)
+#     else:
+#       ue1=ue[1].getFormula(False)
+#       ue0=ue[0].getFormula(False)
+#       for uc in uclean:
+#         uc1=uc[1].getFormula(False)
+#         uc0=uc[0].getFormula(False)
+#         if ue1==uc1 and ue0!=uc0:
+#           uclean.append(ue)
+#   return uclean
